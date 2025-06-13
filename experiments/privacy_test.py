@@ -3,63 +3,112 @@
 """
 File: privacy_test.py
 Author: yshan2028
-Created: 2025-06-13 14:56:13
-Description: 
-    [请在此处添加文件描述]
-
-Dependencies:
-    [请在此处列出主要依赖]
-
-Usage:
-    [请在此处添加使用说明]
+Created: 2025-06-13 08:54:05
+Description: 隐私保护实验
 """
 
-from storage.mysql_storage import MySQLStorage
-from storage.redis_cache import RedisCache
-from algorithms.dynamic_access import DynamicAccessControl
+import logging
+from utils.helpers import generate_id
 
-def run_privacy_test(orders, blockchain, transaction_manager, mysql_storage: MySQLStorage, redis_cache: RedisCache):
-    """
-    运行隐私保护测试。
+logger = logging.getLogger(__name__)
 
-    :param orders: 模拟订单列表。
-    :param blockchain: 区块链存储实例。
-    :param transaction_manager: 交易管理模块实例。
-    :param mysql_storage: MySQL 存储实例。
-    :param redis_cache: Redis 缓存实例。
-    """
-    access_control = DynamicAccessControl()
 
-    print("[INFO] 开始隐私保护测试...")
-    for idx, order in enumerate(orders[:50]):  # 示例测试前 50 条订单
-        roles = ["merchant", "logistics", "customer", "unauthorized"]
-        resources = ["items", "shipping_address", "order_status"]
+def run_privacy_test(orders, storage_modules, algorithm_modules):
+    """运行隐私保护测试"""
+    logger.info("Starting privacy protection test...")
 
-        for role in roles:
-            print(f"[INFO] 测试角色: {role}")
-            for resource in resources:
-                can_access = access_control.can_access(role, resource)
+    results = {
+        "access_control_tests": [],
+        "secret_sharing_tests": [],
+        "zero_knowledge_tests": [],
+        "privacy_scores": {}
+    }
 
-                if can_access:
-                    # 模拟访问链下存储
-                    if resource == "items":
-                        cached_data = redis_cache.get_item(order["order_id"])
-                        if not cached_data:
-                            # 如果 Redis 中未命中，尝试从 MySQL 加载数据
-                            sku = order["items"][0]["sku"] if order["items"] else None
-                            if sku:
-                                cached_data = mysql_storage.fetch_item(sku)
-                                if cached_data:
-                                    redis_cache.set_item(order["order_id"], cached_data)
-                            else:
-                                print(f"[WARNING] 订单 {order['order_id']} 无 SKU 数据，跳过缓存。")
+    roles = ["merchant", "logistics", "payment", "admin"]
 
-                        print(f"[隐私测试] {role} 访问 {resource}: {cached_data}")
-                    elif resource == "shipping_address":
-                        print(f"[隐私测试] {role} 访问 {resource}: {order['shipping_address']}")
-                else:
-                    print(f"[隐私测试] {role} 无权限访问 {resource}。")
+    # 访问控制测试
+    for i, order in enumerate(orders[:20]):
+        role = roles[i % len(roles)]
 
-        if idx % 10 == 0:
-            print(f"[INFO] 隐私测试已处理订单数: {idx + 1}/{50}")
-    print("[INFO] 隐私测试完成。")
+        # 测试访问控制
+        access_result = algorithm_modules['access_control'].verify_access(
+            f"user_{i}", role, "order", "read"
+        )
+
+        # 测试数据过滤
+        filtered_data = algorithm_modules['access_control'].filter_data_fields(order, role)
+
+        results["access_control_tests"].append({
+            "order_id": order["order_id"],
+            "user_role": role,
+            "access_granted": access_result.granted,
+            "filtered_fields_count": len(filtered_data),
+            "original_fields_count": len(order)
+        })
+
+    # 秘密共享测试
+    for order in orders[:15]:
+        secret = hash(order["order_id"]) % 1000000
+        shares, _, k = algorithm_modules['shamir'].share_secret(
+            secret, 5, 0.8, 0.2, 0.4
+        )
+
+        # 测试不同数量分片的重构
+        for test_shares in [k - 1, k, k + 1]:
+            if test_shares <= len(shares):
+                recovered = algorithm_modules['shamir'].reconstruct_secret(shares[:test_shares])
+                success = (recovered == secret) if test_shares >= k else (recovered != secret)
+
+                results["secret_sharing_tests"].append({
+                    "order_id": order["order_id"],
+                    "threshold": k,
+                    "shares_used": test_shares,
+                    "reconstruction_success": success,
+                    "expected_success": test_shares >= k
+                })
+
+    # 零知识证明测试
+    for i, order in enumerate(orders[:10]):
+        role = roles[i % len(roles)]
+        permissions = ["read", "update"] if role != "admin" else ["read", "write", "delete"]
+
+        # 生成证明
+        proof = algorithm_modules['zk_proof'].generate_proof(
+            f"user_{i}", role, permissions
+        )
+
+        # 验证证明
+        is_valid = algorithm_modules['zk_proof'].verify_proof(proof, role)
+
+        results["zero_knowledge_tests"].append({
+            "order_id": order["order_id"],
+            "user_role": role,
+            "proof_valid": is_valid,
+            "permissions": permissions
+        })
+
+    # 计算隐私保护评分
+    access_success_rate = sum(1 for test in results["access_control_tests"] if test["access_granted"]) / len(results["access_control_tests"])
+    sharing_success_rate = sum(1 for test in results["secret_sharing_tests"] if test["reconstruction_success"] == test["expected_success"]) / len(results["secret_sharing_tests"])
+    zk_success_rate = sum(1 for test in results["zero_knowledge_tests"] if test["proof_valid"]) / len(results["zero_knowledge_tests"])
+
+    results["privacy_scores"] = {
+        "access_control_score": access_success_rate * 100,
+        "secret_sharing_score": sharing_success_rate * 100,
+        "zero_knowledge_score": zk_success_rate * 100,
+        "overall_privacy_score": (access_success_rate + sharing_success_rate + zk_success_rate) / 3 * 100
+    }
+
+    # 保存结果
+    experiment_result = {
+        "experiment_id": generate_id("PRIV"),
+        "algorithm_name": "Privacy_Protection",
+        "execution_time": 0.0,  # 隐私测试关注正确性而非性能
+        "throughput": 0.0,
+        "results": results
+    }
+
+    storage_modules['mysql'].save_experiment_result(experiment_result)
+
+    logger.info(f"Privacy test completed. Overall score: {results['privacy_scores']['overall_privacy_score']:.2f}%")
+    return results

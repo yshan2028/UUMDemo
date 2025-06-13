@@ -3,80 +3,81 @@
 """
 File: blockchain_storage.py
 Author: yshan2028
-Created: 2025-06-13 14:56:13
-Description: 
-    [请在此处添加文件描述]
-
-Dependencies:
-    [请在此处列出主要依赖]
-
-Usage:
-    [请在此处添加使用说明]
+Created: 2025-06-13 08:47:13
+Description: 区块链存储逻辑
 """
 
-from hashlib import sha256
+import hashlib
+import json
 import time
+import logging
+from typing import Dict, List
+
+logger = logging.getLogger(__name__)
+
+
+class Block:
+    """区块数据结构"""
+
+    def __init__(self, index: int, timestamp: float, data: dict, previous_hash: str):
+        self.index = index
+        self.timestamp = timestamp
+        self.data = data
+        self.previous_hash = previous_hash
+        self.hash = self.calculate_hash()
+
+    def calculate_hash(self) -> str:
+        """计算区块哈希"""
+        block_string = json.dumps({
+            "index": self.index,
+            "timestamp": self.timestamp,
+            "data": self.data,
+            "previous_hash": self.previous_hash
+        }, sort_keys=True)
+        return hashlib.sha256(block_string.encode()).hexdigest()
+
 
 class BlockchainStorage:
-    """
-    实现区块链存储逻辑，模拟将订单的哈希存储到区块链上。
-    """
+    """区块链存储实现"""
 
-    def __init__(self, blockchain_type="Hyperledger"):
-        """
-        初始化区块链存储实例。
+    def __init__(self):
+        self.chain = []
+        self.pending_transactions = []
+        self._create_genesis_block()
 
-        :param blockchain_type: 区块链类型 ("Hyperledger" 或 "Ethereum")。
-        """
-        self.blockchain_type = blockchain_type
-        self.chain = []  # 模拟区块链链条
+    def _create_genesis_block(self):
+        """创建创世块"""
+        genesis_block = Block(0, time.time(), {"message": "Genesis Block"}, "0")
+        self.chain.append(genesis_block)
+        logger.info("Genesis block created")
 
-    def add_transaction(self, transaction_data: dict) -> str:
-        """
-        添加交易到区块链。
+    def get_latest_block(self) -> Block:
+        """获取最新区块"""
+        return self.chain[-1]
 
-        :param transaction_data: 包含订单 ID 和相关数据的交易字典。
-        :return: 生成的交易哈希值。
-        """
-        timestamp = time.time()
-        transaction_data["timestamp"] = timestamp
-        transaction_hash = sha256(str(transaction_data).encode()).hexdigest()
+    def add_transaction(self, transaction: dict):
+        """添加交易到待处理池"""
+        self.pending_transactions.append(transaction)
 
-        block = {
-            "transaction_hash": transaction_hash,
-            "transaction_data": transaction_data,
-            "timestamp": timestamp,
-        }
+    def mine_pending_transactions(self) -> Block:
+        """挖矿处理待处理交易"""
+        block = Block(
+            len(self.chain),
+            time.time(),
+            {"transactions": self.pending_transactions},
+            self.get_latest_block().hash
+        )
+
         self.chain.append(block)
-        print(f"[INFO] 交易已添加到区块链，哈希值: {transaction_hash}")
-        return transaction_hash
+        self.pending_transactions = []
 
-    def verify_transaction(self, transaction_hash: str) -> bool:
-        """
-        验证区块链中是否存在指定交易。
+        logger.info(f"Block mined: {block.hash[:16]}...")
+        return block
 
-        :param transaction_hash: 要验证的交易哈希值。
-        :return: 布尔值，表示交易是否存在。
-        """
-        for block in self.chain:
-            if block["transaction_hash"] == transaction_hash:
-                print(f"[INFO] 交易验证成功，哈希值: {transaction_hash}")
-                return True
-        print(f"[ERROR] 未找到交易，哈希值: {transaction_hash}")
-        return False
-
-    def get_chain(self) -> list:
-        """
-        获取整个区块链的链条。
-
-        :return: 区块链的链条列表。
-        """
-        return self.chain
-
-if __name__ == "__main__":
-    # 测试区块链存储功能
-    blockchain = BlockchainStorage("Hyperledger")
-    transaction_data = {"order_id": "ORD12345", "amount": 100.0, "status": "Paid"}
-    tx_hash = blockchain.add_transaction(transaction_data)
-    blockchain.verify_transaction(tx_hash)
-    print("当前区块链链条:", blockchain.get_chain())
+    def get_chain_info(self) -> dict:
+        """获取区块链信息"""
+        return {
+            "total_blocks": len(self.chain),
+            "pending_transactions": len(self.pending_transactions),
+            "latest_block_hash": self.get_latest_block().hash
+        }

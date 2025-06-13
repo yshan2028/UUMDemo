@@ -3,177 +3,115 @@
 """
 File: dynamic_access.py
 Author: yshan2028
-Created: 2025-06-13 14:56:13
-Description: 
-    联盟链隐私保护实验中的动态访问控制模块
-    实现基于角色的访问控制(RBAC)，支持商家、物流、客户三种角色
-    用于验证不同角色对订单隐私数据的访问权限控制效果
-
-Dependencies:
-    - typing: 类型注解支持
-    - logging: 访问控制日志记录
-
-Usage:
-    from access_control.dynamic_access import DynamicAccessControl
-
-    # 创建访问控制实例
-    access_control = DynamicAccessControl()
-
-    # 验证权限
-    can_access = access_control.can_access("merchant", "items")
+Created: 2025-06-13 08:47:13
+Description: 动态权限管理模块
 """
 
+import time
 import logging
-from typing import Dict, List, Optional
+from enum import Enum
+from typing import List
 
-# 配置日志记录
 logger = logging.getLogger(__name__)
 
 
-class DynamicAccessControl:
-    """
-    动态访问控制系统
+class AccessLevel(Enum):
+    DENIED = 0
+    READ = 1
+    WRITE = 2
+    DELETE = 3
+    ADMIN = 4
 
-    实现基于角色的访问控制(RBAC)模型，用于论文实验中验证
-    不同角色对订单隐私数据的访问权限控制效果
-    """
+
+class AccessResult:
+    """访问结果类"""
+
+    def __init__(self, granted: bool, access_level: AccessLevel, allowed_fields: List[str], reason: str):
+        self.granted = granted
+        self.access_level = access_level
+        self.allowed_fields = allowed_fields
+        self.reason = reason
+
+
+class DynamicAccessControl:
+    """动态访问控制系统"""
 
     def __init__(self):
-        """
-        初始化动态访问控制系统
-        """
-        # 角色权限映射表 - 论文实验的核心配置
-        self.permissions: Dict[str, List[str]] = {
-            "merchant": [
-                "items",  # 商品信息
-                "order_amount",  # 订单金额
-                "customer_contact"  # 客户联系方式
-            ],
-            "logistics": [
-                "shipping_address",  # 配送地址
-                "delivery_time",  # 配送时间
-                "tracking_number"  # 快递单号
-            ],
-            "customer": [
-                "order_status",  # 订单状态
-                "payment_status",  # 支付状态
-                "delivery_progress"  # 配送进度
-            ]
+        self.operations = 0
+        self.total_time = 0.0
+
+        self.role_permissions = {
+            "merchant": {
+                "operations": ["read", "update"],
+                "accessible_fields": ["order_id", "product_list", "order_status", "order_time"],
+                "forbidden_fields": ["customer_address", "payment_details"]
+            },
+            "logistics": {
+                "operations": ["read", "update"],
+                "accessible_fields": ["order_id", "shipping_address", "customer_phone", "logistics_status"],
+                "forbidden_fields": ["payment_details", "product_price"]
+            },
+            "payment": {
+                "operations": ["read", "update"],
+                "accessible_fields": ["order_id", "transaction_amount", "payment_method", "payment_status"],
+                "forbidden_fields": ["shipping_address", "customer_phone"]
+            },
+            "admin": {
+                "operations": ["read", "write", "delete", "admin"],
+                "accessible_fields": ["*"],
+                "forbidden_fields": []
+            }
         }
 
-        # 访问统计 - 用于实验结果分析
-        self.access_attempts: Dict[str, int] = {
-            "total": 0,
-            "granted": 0,
-            "denied": 0
-        }
+    def verify_access(self, user_id: str, role: str, resource_type: str, operation: str) -> AccessResult:
+        """验证用户访问权限"""
+        start_time = time.time()
 
-        logger.info("Dynamic Access Control initialized for privacy experiment")
+        if role not in self.role_permissions:
+            return AccessResult(False, AccessLevel.DENIED, [], f"Unknown role: {role}")
 
-    def can_access(self, role: str, resource: str) -> bool:
-        """
-        验证角色是否有权限访问指定资源
+        role_config = self.role_permissions[role]
+        allowed_operations = role_config.get("operations", [])
 
-        Args:
-            role: 用户角色（merchant/logistics/customer）
-            resource: 资源类型
+        if operation not in allowed_operations and "*" not in allowed_operations:
+            return AccessResult(False, AccessLevel.DENIED, [], f"Operation not allowed: {operation}")
 
-        Returns:
-            bool: 是否有访问权限
-        """
-        # 记录访问尝试
-        self.access_attempts["total"] += 1
+        access_level = AccessLevel.READ
+        if operation in ["write", "update"]:
+            access_level = AccessLevel.WRITE
+        elif operation == "delete":
+            access_level = AccessLevel.DELETE
+        elif operation == "admin":
+            access_level = AccessLevel.ADMIN
 
-        # 检查角色权限
-        allowed_resources = self.permissions.get(role, [])
-        has_permission = resource in allowed_resources
+        allowed_fields = role_config.get("accessible_fields", [])
+        self._update_stats(time.time() - start_time)
 
-        # 更新统计
-        if has_permission:
-            self.access_attempts["granted"] += 1
-            logger.info(f"Access granted: {role} -> {resource}")
+        return AccessResult(True, access_level, allowed_fields, "Access granted")
+
+    def filter_data_fields(self, data: dict, user_role: str) -> dict:
+        """根据用户角色过滤数据字段"""
+        if user_role not in self.role_permissions:
+            return {}
+
+        role_config = self.role_permissions[user_role]
+        accessible_fields = role_config.get("accessible_fields", [])
+        forbidden_fields = role_config.get("forbidden_fields", [])
+
+        filtered_data = {}
+
+        if "*" in accessible_fields:
+            for key, value in data.items():
+                if key not in forbidden_fields:
+                    filtered_data[key] = value
         else:
-            self.access_attempts["denied"] += 1
-            logger.warning(f"Access denied: {role} -> {resource}")
+            for field in accessible_fields:
+                if field in data and field not in forbidden_fields:
+                    filtered_data[field] = data[field]
 
-        return has_permission
+        return filtered_data
 
-    def get_role_permissions(self, role: str) -> List[str]:
-        """
-        获取指定角色的所有权限
-
-        Args:
-            role: 用户角色
-
-        Returns:
-            List[str]: 权限列表
-        """
-        return self.permissions.get(role, [])
-
-    def get_access_statistics(self) -> Dict[str, int]:
-        """
-        获取访问控制统计信息
-
-        Returns:
-            Dict[str, int]: 访问统计数据
-        """
-        return self.access_attempts.copy()
-
-    def reset_statistics(self) -> None:
-        """
-        重置访问统计数据
-        """
-        self.access_attempts = {
-            "total": 0,
-            "granted": 0,
-            "denied": 0
-        }
-        logger.info("Access statistics reset")
-
-
-def main():
-    """
-    动态访问控制实验演示
-    """
-    print("=" * 60)
-    print("DYNAMIC ACCESS CONTROL EXPERIMENT")
-    print("=" * 60)
-
-    # 初始化访问控制系统
-    access_control = DynamicAccessControl()
-
-    # 实验测试用例
-    print("\nTesting Role-Based Access Control:")
-    print("-" * 40)
-
-    test_cases = [
-        ("merchant", "items"),
-        ("merchant", "shipping_address"),  # Should be denied
-        ("logistics", "shipping_address"),
-        ("logistics", "items"),  # Should be denied
-        ("customer", "order_status"),
-        ("customer", "items")  # Should be denied
-    ]
-
-    for role, resource in test_cases:
-        has_access = access_control.can_access(role, resource)
-        status = "GRANTED" if has_access else "DENIED"
-        print(f"{status}: {role} accessing {resource}")
-
-    # 显示统计结果
-    print(f"\nAccess Control Statistics:")
-    print("-" * 40)
-    stats = access_control.get_access_statistics()
-    print(f"Total attempts: {stats['total']}")
-    print(f"Granted: {stats['granted']}")
-    print(f"Denied: {stats['denied']}")
-
-    if stats['total'] > 0:
-        success_rate = (stats['granted'] / stats['total']) * 100
-        print(f"Success rate: {success_rate:.1f}%")
-
-    print("=" * 60)
-
-
-if __name__ == "__main__":
-    main()
+    def _update_stats(self, operation_time: float):
+        """更新性能统计"""
+        self.operations += 1
+        self.total_time += operation_time

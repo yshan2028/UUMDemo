@@ -3,112 +3,61 @@
 """
 File: redis_cache.py
 Author: yshan2028
-Created: 2025-06-13 14:56:13
-Description: 
-    [请在此处添加文件描述]
-
-Dependencies:
-    [请在此处列出主要依赖]
-
-Usage:
-    [请在此处添加使用说明]
+Created: 2025-06-13 08:47:13
+Description: Redis缓存实现
 """
 
 import redis
 import json
-from decimal import Decimal
+import logging
+from config.settings import REDIS_CONFIG
+
+logger = logging.getLogger(__name__)
+
 
 class RedisCache:
-    """
-    实现链下数据的 Redis 缓存逻辑。
-    """
+    """Redis缓存实现"""
 
-    def __init__(self, host="localhost", port=6379, db=0):
-        """
-        初始化 Redis 连接。
+    def __init__(self):
+        self.redis_conn = None
+        self._connect()
 
-        :param host: Redis 主机地址。
-        :param port: Redis 端口。
-        :param db: Redis 数据库索引。
-        """
+    def _connect(self):
+        """连接Redis"""
         try:
-            self.client = redis.StrictRedis(host=host, port=port, db=db, decode_responses=True)
-            print("[INFO] 成功连接到 Redis 缓存。")
-        except redis.ConnectionError as e:
-            print(f"[ERROR] 连接 Redis 失败: {e}")
+            self.redis_conn = redis.Redis(**REDIS_CONFIG)
+            self.redis_conn.ping()
+            logger.info("Redis connected successfully")
+        except Exception as e:
+            logger.error(f"Redis connection failed: {str(e)}")
             raise
 
-    def _convert_to_serializable(self, data):
-        """
-        递归转换数据中的 Decimal 为 float 或其他可序列化类型。
-
-        :param data: 要转换的字典或列表。
-        :return: 转换后的数据。
-        """
-        if isinstance(data, dict):
-            return {key: self._convert_to_serializable(value) for key, value in data.items()}
-        elif isinstance(data, list):
-            return [self._convert_to_serializable(item) for item in data]
-        elif isinstance(data, Decimal):
-            return float(data)  # 或者 str(data)
-        else:
-            return data
-
-    def set_item(self, key: str, value: dict, ttl: int = 3600):
-        """
-        设置缓存数据，仅缓存非空值。
-
-        :param key: 缓存键。
-        :param value: 缓存值（字典）。
-        :param ttl: 数据的过期时间（秒）。
-        """
-        if value:  # 仅缓存非空数据
-            try:
-                serializable_value = self._convert_to_serializable(value)
-                self.client.setex(key, ttl, json.dumps(serializable_value))
-                print(f"[INFO] 数据已缓存，键: {key}")
-            except redis.RedisError as e:
-                print(f"[ERROR] 缓存数据失败: {e}")
-        else:
-            print(f"[INFO] 跳过空数据的缓存，键: {key}")
-
-    def get_item(self, key: str) -> dict:
-        """
-        获取缓存数据。
-
-        :param key: 缓存键。
-        :return: 缓存的值（字典）。
-        """
+    def set(self, key: str, value, expiry: int = 3600) -> bool:
+        """设置缓存值"""
         try:
-            value = self.client.get(key)
-            return json.loads(value) if value else {}
-        except redis.RedisError as e:
-            print(f"[ERROR] 获取缓存数据失败: {e}")
-            return {}
+            serialized_value = json.dumps(value)
+            self.redis_conn.setex(key, expiry, serialized_value)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to set cache key {key}: {str(e)}")
+            return False
 
-    def delete_item(self, key: str):
-        """
-        删除缓存数据。
-
-        :param key: 缓存键。
-        """
+    def get(self, key: str):
+        """获取缓存值"""
         try:
-            self.client.delete(key)
-            print(f"[INFO] 缓存数据已删除，键: {key}")
-        except redis.RedisError as e:
-            print(f"[ERROR] 删除缓存数据失败: {e}")
+            value = self.redis_conn.get(key)
+            if value:
+                return json.loads(value)
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get cache key {key}: {str(e)}")
+            return None
 
-if __name__ == "__main__":
-    # 测试 Redis 缓存功能
-    redis_cache = RedisCache()
-
-    # 模拟存储包含 Decimal 的数据
-    sample_data = {"sku": "SKU1234", "price": Decimal("49.99"), "quantity": 10}
-    redis_cache.set_item("SKU1234", sample_data)
-
-    # 获取缓存数据
-    cached_data = redis_cache.get_item("SKU1234")
-    print("缓存数据:", cached_data)
-
-    # 删除缓存数据
-    redis_cache.delete_item("SKU1234")
+    def close_connection(self):
+        """关闭Redis连接"""
+        try:
+            if self.redis_conn:
+                self.redis_conn.close()
+            logger.info("Redis connection closed")
+        except Exception as e:
+            logger.error(f"Error closing Redis connection: {str(e)}")

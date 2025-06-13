@@ -1,42 +1,156 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-contract Orders {
-    // 订单结构体
+/**
+ * @title DVSS-PPA Orders Contract
+ * @author yshan2028
+ * @dev Smart contract for managing order processing
+ */
+contract DVSSOrders {
+
+    // Events
+    event OrderCreated(string indexed orderId, address indexed customer, uint256 amount);
+    event OrderUpdated(string indexed orderId, OrderStatus status);
+    event ShareStored(string indexed orderId, string shareId);
+
+    // Enums
+    enum OrderStatus {
+        Created,
+        Processing,
+        Shipped,
+        Delivered,
+        Completed,
+        Cancelled
+    }
+
+    // Structures
     struct Order {
         string orderId;
-        string status; // 状态：Processing, Shipped, Delivered, Cancelled
-        uint256 timestamp;
+        address customer;
+        uint256 amount;
+        OrderStatus status;
+        uint256 createdAt;
+        string[] shareIds;
     }
 
-    // 订单 ID 到订单详情的映射
-    mapping(string => Order) private orders;
+    struct ShareMetadata {
+        string shareId;
+        string orderId;
+        uint256 threshold;
+        uint256 createdAt;
+        bool isActive;
+    }
 
-    // 事件
-    event OrderCreated(string indexed orderId, string status);
-    event OrderUpdated(string indexed orderId, string status);
+    // State variables
+    mapping(string => Order) public orders;
+    mapping(string => ShareMetadata) public shares;
+    mapping(address => string[]) public customerOrders;
 
-    // 创建订单
-    function createOrder(string memory orderId, string memory status) public {
+    address public owner;
+    uint256 public totalOrders;
+    uint256 public totalShares;
+
+    // Modifiers
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only owner can perform this action");
+        _;
+    }
+
+    modifier orderExists(string memory orderId) {
+        require(bytes(orders[orderId].orderId).length > 0, "Order does not exist");
+        _;
+    }
+
+    constructor() {
+        owner = msg.sender;
+    }
+
+    /**
+     * @dev Create new order
+     * @param orderId Unique order identifier
+     * @param customer Customer address
+     * @param amount Order amount
+     */
+    function createOrder(
+        string memory orderId,
+        address customer,
+        uint256 amount
+    ) external {
+        require(bytes(orderId).length > 0, "Order ID cannot be empty");
+        require(customer != address(0), "Invalid customer address");
+        require(amount > 0, "Amount must be greater than 0");
         require(bytes(orders[orderId].orderId).length == 0, "Order already exists");
 
-        orders[orderId] = Order(orderId, status, block.timestamp);
-        emit OrderCreated(orderId, status);
+        orders[orderId].orderId = orderId;
+        orders[orderId].customer = customer;
+        orders[orderId].amount = amount;
+        orders[orderId].status = OrderStatus.Created;
+        orders[orderId].createdAt = block.timestamp;
+
+        customerOrders[customer].push(orderId);
+        totalOrders++;
+
+        emit OrderCreated(orderId, customer, amount);
     }
 
-    // 更新订单状态
-    function updateOrderStatus(string memory orderId, string memory newStatus) public {
-        require(bytes(orders[orderId].orderId).length != 0, "Order does not exist");
+    /**
+     * @dev Store secret share for order
+     * @param orderId Order identifier
+     * @param shareId Share identifier
+     * @param threshold Reconstruction threshold
+     */
+    function storeShare(
+        string memory orderId,
+        string memory shareId,
+        uint256 threshold
+    ) external orderExists(orderId) {
+        require(bytes(shareId).length > 0, "Share ID cannot be empty");
+        require(threshold > 0, "Threshold must be greater than 0");
+        require(!shares[shareId].isActive, "Share already exists");
 
-        orders[orderId].status = newStatus;
-        emit OrderUpdated(orderId, newStatus);
+        shares[shareId] = ShareMetadata({
+            shareId: shareId,
+            orderId: orderId,
+            threshold: threshold,
+            createdAt: block.timestamp,
+            isActive: true
+        });
+
+        orders[orderId].shareIds.push(shareId);
+        totalShares++;
+
+        emit ShareStored(orderId, shareId);
     }
 
-    // 查询订单
-    function getOrder(string memory orderId) public view returns (string memory, string memory, uint256) {
-        require(bytes(orders[orderId].orderId).length != 0, "Order does not exist");
+    /**
+     * @dev Get order details
+     * @param orderId Order identifier
+     * @return Order details
+     */
+    function getOrder(string memory orderId)
+        external view orderExists(orderId) returns (
+            string memory,
+            address,
+            uint256,
+            OrderStatus,
+            uint256
+        ) {
+        Order storage order = orders[orderId];
+        return (
+            order.orderId,
+            order.customer,
+            order.amount,
+            order.status,
+            order.createdAt
+        );
+    }
 
-        Order memory order = orders[orderId];
-        return (order.orderId, order.status, order.timestamp);
+    /**
+     * @dev Get contract statistics
+     * @return totalOrders Total number of orders
+     * @return totalShares Total number of shares
+     */
+    function getStats() external view returns (uint256, uint256) {
+        return (totalOrders, totalShares);
     }
 }

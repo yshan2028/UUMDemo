@@ -1,0 +1,26 @@
+[
+    {
+        "order_id": "ORDER_1703312833000",
+        "customer_id": "CUST_1234",
+        "merchant_id": "MERCH_567",
+        "logistics_id": "LOG_890",
+        "order_items": [
+            {
+                "sku": "ITEM_5678",
+                "quantity": 2,
+                "price": 29.99
+            }
+        ],
+        "total_amount": 59.98,
+        "order_status": "confirmed",
+        "payment_status": "paid",
+        "privacy_requirements": {
+            "merchant_access": ["items", "amount"],
+            "logistics_access": ["address"],
+            "customer_access": ["status"]
+        },
+        "requires_secret_sharing": true,
+        "shamir_threshold": 3,
+        "shamir_shares": 5
+    }
+]

@@ -3,42 +3,39 @@
 """
 File: helpers.py
 Author: yshan2028
-Created: 2025-06-13 14:56:13
-Description: 
-    [请在此处添加文件描述]
-
-Dependencies:
-    [请在此处列出主要依赖]
-
-Usage:
-    [请在此处添加使用说明]
+Created: 2025-06-13 08:47:13
+Description: 工具函数
 """
 
-from datetime import datetime
+import hashlib
+import time
+import json
+from typing import Any, Dict
 
-def format_timestamp(timestamp: float) -> str:
-    """
-    格式化时间戳为可读字符串。
 
-    :param timestamp: 时间戳。
-    :return: 格式化后的时间字符串。
-    """
-    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+def generate_id(prefix: str) -> str:
+    """生成唯一ID"""
+    timestamp = int(time.time() * 1000)
+    return f"{prefix}_{timestamp}"
 
-def validate_order_data(order: dict) -> bool:
-    """
-    验证订单数据是否完整。
 
-    :param order: 订单数据。
-    :return: 验证结果（布尔值）。
-    """
-    required_keys = ["order_id", "payment", "items", "shipping_address"]
-    for key in required_keys:
-        if key not in order:
-            return False
-    return True
+def hash_data(data: Any) -> str:
+    """计算数据哈希"""
+    if isinstance(data, dict):
+        data_str = json.dumps(data, sort_keys=True)
+    else:
+        data_str = str(data)
+    return hashlib.sha256(data_str.encode()).hexdigest()
 
-if __name__ == "__main__":
-    # 测试工具函数
-    print(format_timestamp(1672531199))
-    print(validate_order_data({"order_id": "ORD001", "payment": {}, "items": [], "shipping_address": {}}))
+
+def calculate_metrics(data_list: list) -> Dict[str, float]:
+    """计算性能指标"""
+    if not data_list:
+        return {"avg": 0, "min": 0, "max": 0}
+
+    return {
+        "avg": sum(data_list) / len(data_list),
+        "min": min(data_list),
+        "max": max(data_list),
+        "count": len(data_list)
+    }
